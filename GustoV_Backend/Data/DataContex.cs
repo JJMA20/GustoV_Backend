@@ -16,14 +16,12 @@ namespace GustoV_Backend.Data
         {
             base.OnModelCreating(modelBuilder);
 
-            // Configurar la relación entre Venta y DetalleVenta
             modelBuilder.Entity<DetalleVenta>()
                 .HasOne(d => d.venta)
                 .WithMany(v => v.detalles)
                 .HasForeignKey(d => d.ventaId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Configurar la relación entre DetalleVenta y Menu
             modelBuilder.Entity<DetalleVenta>()
                 .HasOne(d => d.menu)
                 .WithMany()

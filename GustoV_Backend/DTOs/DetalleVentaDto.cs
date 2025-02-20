@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-public class VentaDetalleDTO
+public class DetalleVentaDto
 {
     [Required]
     public int menuId { get; set; }

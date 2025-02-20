@@ -8,6 +8,6 @@ namespace GustoV_Backend.DTOs
     {
         [Required]
         public string metodoPago { get; set; }
-        public List<VentaDetalleDTO> detalles { get; set; } = new List<VentaDetalleDTO>();
+        public List<DetalleVentaDto> detalles { get; set; } = new List<DetalleVentaDto>();
     }
 }
