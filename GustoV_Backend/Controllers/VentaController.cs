@@ -3,6 +3,7 @@ using GustoV_Backend.Models;
 using GustoV_Backend.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ClosedXML.Excel;
 
 namespace GustoV_Backend.Controllers
 {
@@ -83,81 +84,88 @@ namespace GustoV_Backend.Controllers
             return CreatedAtAction(nameof(GetVenta), new { id = venta.id }, venta);
         }
 
-        [HttpPost("{ventaId}/detalles")]
-        public async Task<ActionResult<DetalleVenta>> AgregarDetalle(int ventaId, [FromBody] VentaDetalleDTO detalleDto)
+
+        [HttpGet("reporte-diario")]
+        public async Task<ActionResult> GetReporteVentasDiario([FromQuery] DateTime? fecha = null)
         {
-            var venta = await _context.Ventas
+            var fechaConsulta = fecha ?? DateTime.UtcNow.Date;
+
+            var ventasDelDia = await _context.Ventas
+                .Where(v => v.fecha.Date == fechaConsulta)
                 .Include(v => v.detalles)
-                .FirstOrDefaultAsync(v => v.id == ventaId);
+                .ThenInclude(d => d.menu)
+                .ToListAsync();
 
-            if (venta == null)
+            if (ventasDelDia.Count == 0)
             {
-                return NotFound("Venta no encontrada");
+                return NotFound(new { mensaje = "No hay ventas registradas para la fecha indicada." });
             }
 
-            var menu = await _context.Menus.FindAsync(detalleDto.menuId);
-            if (menu == null)
+            var totalVentas = ventasDelDia.Count;
+            var totalIngresos = ventasDelDia.Sum(v => v.total);
+            var platosVendidos = ventasDelDia
+                .SelectMany(v => v.detalles)
+                .GroupBy(d => d.menu.nombre)
+                .Select(g => new { Plato = g.Key, Cantidad = g.Sum(d => d.cantidad) })
+                .ToList();
+
+            return Ok(new
             {
-                return BadRequest("Menú no encontrado");
-            }
-
-            var detalle = new DetalleVenta
-            {
-                ventaId = ventaId,
-                menuId = detalleDto.menuId,
-                cantidad = detalleDto.cantidad,
-                subtotal = menu.precio * detalleDto.cantidad
-            };
-
-            venta.detalles.Add(detalle);
-            venta.total += detalle.subtotal;
-
-            await _context.SaveChangesAsync();
-
-            return Ok(detalle);
+                Fecha = fechaConsulta,
+                TotalVentas = totalVentas,
+                TotalIngresos = totalIngresos,
+                PlatosVendidos = platosVendidos
+            });
         }
 
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> EliminarVenta(int id)
+        [HttpGet("reporte-diario/excel")]
+        public async Task<IActionResult> GetReporteVentasDiarioExcel([FromQuery] DateTime? fecha = null)
         {
-            var venta = await _context.Ventas
-                .Include(v => v.detalles)
-                .FirstOrDefaultAsync(v => v.id == id);
+            var fechaConsulta = fecha ?? DateTime.UtcNow.Date;
 
-            if (venta == null)
+            var ventasDelDia = await _context.Ventas
+                .Where(v => v.fecha.Date == fechaConsulta)
+                .Include(v => v.detalles)
+                .ThenInclude(d => d.menu)
+                .ToListAsync();
+
+            if (ventasDelDia.Count == 0)
             {
-                return NotFound();
+                return NotFound(new { mensaje = "No hay ventas registradas para la fecha indicada." });
             }
 
-            _context.Ventas.Remove(venta);
-            await _context.SaveChangesAsync();
+            using (var workbook = new XLWorkbook())
+            {
+                var worksheet = workbook.Worksheets.Add("Reporte Diario");
 
-            return NoContent();
+                worksheet.Cell(1, 1).Value = "Fecha";
+                worksheet.Cell(1, 2).Value = "Plato";
+                worksheet.Cell(1, 3).Value = "Cantidad Vendida";
+                worksheet.Cell(1, 4).Value = "Total Venta (Bs.)";
+
+                int row = 2;
+                foreach (var venta in ventasDelDia)
+                {
+                    foreach (var detalle in venta.detalles)
+                    {
+                        worksheet.Cell(row, 1).Value = venta.fecha.ToString("yyyy-MM-dd");
+                        worksheet.Cell(row, 2).Value = detalle.menu.nombre;
+                        worksheet.Cell(row, 3).Value = detalle.cantidad;
+                        worksheet.Cell(row, 4).Value = detalle.cantidad * detalle.menu.precio;
+                        row++;
+                    }
+                }
+
+                worksheet.Columns().AdjustToContents();
+
+                using (var stream = new MemoryStream())
+                {
+                    workbook.SaveAs(stream);
+                    var content = stream.ToArray();
+                    return File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Reporte_Ventas_{fechaConsulta:yyyyMMdd}.xlsx");
+                }
+            }
         }
 
-        [HttpDelete("{ventaId}/detalles/{detalleId}")]
-        public async Task<IActionResult> EliminarDetalle(int ventaId, int detalleId)
-        {
-            var venta = await _context.Ventas
-                .Include(v => v.detalles)
-                .FirstOrDefaultAsync(v => v.id == ventaId);
-
-            if (venta == null)
-            {
-                return NotFound("Venta no encontrada");
-            }
-
-            var detalle = venta.detalles.FirstOrDefault(d => d.id == detalleId);
-            if (detalle == null)
-            {
-                return NotFound("Detalle no encontrado");
-            }
-
-            venta.total -= detalle.subtotal;
-            _context.DetallesVenta.Remove(detalle);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
     }
 }
